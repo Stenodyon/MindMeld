@@ -185,7 +185,7 @@ void execute(const char *instructions)
                 if(**data_ptr == 0){       //If the data_ptr is zero, skip to the matching close bracket
                     int level = 1;
                     while(level){
-                        instruction_pointer+=1;
+                        instruction_pointer+=2;
                         if (*instruction_pointer == '[') {
                             level++;
                         } else
@@ -199,7 +199,7 @@ void execute(const char *instructions)
                 if(**data_ptr != 0){       //If the data_ptr is not zero, jump back to the matching open bracket
                     int level = 1;
                     while(level){
-                        instruction_pointer-=1;
+                        instruction_pointer-=2;
                         if (*instruction_pointer == '[') {
                             level--;
                         } else
