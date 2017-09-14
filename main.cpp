@@ -47,24 +47,34 @@
 //Pre-processing functions
 std::string source_read(const std::string & filename);
 std::string source_sanitize(const std::string & source);
+std::string switch_sanitize(const std::string & source);
 
 //Execution function
 void execute(const char *instructions);
 
+bool SWITCH = false;
+
 int main(int argc, char * argv[])
 {
     std::string path;
-    if(argc == 1)
+    for(int arg_pos = 1; arg_pos < argc; arg_pos++)
+    {
+        if(std::string(argv[arg_pos]) == "--switch")
+            SWITCH = true;
+        else
+            path = std::string(argv[arg_pos]);
+    }
+    if(argc == 0)
     {
         std::cout << "Enter a path to a MindMeld source file: ";
         getline(std::cin, path);
     }
-    else
-    {
-        path = std::string(argv[1]);
-    }
     std::string raw_source(source_read(path));
-    std::string instructions(source_sanitize(raw_source));
+    std::string instructions;
+    if(SWITCH)
+        instructions = std::string(switch_sanitize(raw_source));
+    else
+        instructions = std::string(source_sanitize(raw_source));
     std::cout << instructions << std::endl;
     execute(instructions.c_str());
     std::cout << std::endl << "Press any key to continue..." << std::endl;
@@ -86,7 +96,6 @@ std::string source_read(const std::string & filename)
         char *contents = new char[length+1];
         source.read(contents, length);
         contents[strlen(contents)]='\0';
-        source_sanitize(contents);
         return std::string(contents);
     } else {
         std::cerr << "Could not read " << filename << std::endl;
@@ -122,6 +131,34 @@ std::string source_sanitize(const std::string & source)
             case ']': // FALLTHROUGH
                 lastWasAB = false;
                 stream << c;
+                break;
+        }
+    }
+    return stream.str();
+}
+
+//Remove invalid characters from the raw source
+std::string switch_sanitize(const std::string & source)
+{
+    std::ostringstream stream;
+    char ptr_specifier = 'A';
+    for(const char c : source)
+    {
+        switch(c){
+            case 'A':
+            case 'B': // FALLTHROUGH
+                ptr_specifier = c;
+                break;
+
+            case '<':
+            case '>': // FALLTHROUGH
+            case '-': // FALLTHROUGH
+            case '+': // FALLTHROUGH
+            case '.': // FALLTHROUGH
+            case ',': // FALLTHROUGH
+            case '[': // FALLTHROUGH
+            case ']': // FALLTHROUGH
+                stream << c << ptr_specifier;
                 break;
         }
     }
@@ -214,7 +251,6 @@ void execute(const char *instructions)
                 assert(false); // Should never happen
         }
         instruction_pointer+=2;         //Move to the next instruction
-
-        uint64_t n = (instruction_pointer - instructions) / 2; // Debug
     }
 }
+
