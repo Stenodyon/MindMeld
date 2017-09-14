@@ -30,48 +30,56 @@
  *              move the instruction pointer backward to the matching open bracket (Either [A or [B is acceptable)
  *              Otherwise, move the instruction pointer forward to the next instruction
  */
-#include <iostream>
-#include <fstream>
+#include <cassert>
 #include <cstring>
-#include <cstdio>
+#include <cstdint>
+#include <fstream>
+#include <iostream>
+#include <memory>
+#include <sstream>
+#ifdef _WIN32
 #include <conio.h>
+#endif
+#ifdef __unix
+#include "getch.hpp"
+#endif
 
 //Pre-processing functions
-char* source_read(const char* filename);
-char* source_sanitize(char *source);
+std::string source_read(const std::string & filename);
+std::string source_sanitize(const std::string & source);
 
 //Execution function
-void execute(char *instructions);
+void execute(const char *instructions);
 
-int main()
+int main(int argc, char * argv[])
 {
-    std::cout << "Enter a path to a MindMeld source file: ";
     std::string path;
-    getline(std::cin, path);
-    char *raw_source = source_read(path.c_str());
-    if(raw_source==nullptr){
-        std::cout << std::endl << "Could not read the file \""<<path<<"\". Are you sure it exists?" << std::endl;
-        std::cout << "Press any key to continue..." << std::endl;
-        getch();
-        return 1;
+    if(argc == 1)
+    {
+        std::cout << "Enter a path to a MindMeld source file: ";
+        getline(std::cin, path);
     }
-    char *instructions=source_sanitize(raw_source);
-    printf("%s\n", instructions);
-    execute(instructions);
+    else
+    {
+        path = std::string(argv[1]);
+    }
+    std::string raw_source(source_read(path));
+    std::string instructions(source_sanitize(raw_source));
+    std::cout << instructions << std::endl;
+    execute(instructions.c_str());
     std::cout << std::endl << "Press any key to continue..." << std::endl;
     getch();
     return 0;
 }
 
 //Reads the given file, sanitizes it, and returns a cstring of instruction characters
-char* source_read(const char* filename)
+std::string source_read(const std::string & filename)
 {
-    std::fstream source;
-    source.open(filename, source.in);
+    std::fstream source(filename, source.in);
     if(source){
         //Get the number of chars in the file
         source.seekg (0, source.end);
-        long long int length = source.tellg();
+        uint64_t length = source.tellg();
         source.seekg (0, source.beg);
 
         //Read the file into a char array
@@ -79,134 +87,125 @@ char* source_read(const char* filename)
         source.read(contents, length);
         contents[strlen(contents)]='\0';
         source_sanitize(contents);
-        return contents;
+        return std::string(contents);
     } else {
-        return nullptr;
+        std::cerr << "Could not read " << filename << std::endl;
+        std::cout << "Press any key to continue..." << std::endl;
+        getch();
+        exit(-1);
     }
 }
 
 //Remove invalid characters from the raw source
-//TODO: Add in removing comments marked with /*example comment*/, so you can have comments with MM command characters.
-char* source_sanitize(char *source)
+std::string source_sanitize(const std::string & source)
 {
-    long long int valid_count = 0; //Interpreter can hypothetically handle up to 16 exbibytes worth of executable code.
-
-    //Count the number of valid characters in the source file
-    char *source_i = source; //Iterator pointer for raw source code
-    while(*source_i){
-        switch(*source_i){
-            case 'A':
-            case 'B':
-            case '<':
-            case '>':
-            case '-':
-            case '+':
-            case '.':
-            case ',':
-            case '[':
+    std::ostringstream stream;
+    for(const char c : source)
+    {
+        switch(c){
+            case 'A': // FALLTHROUGH
+            case 'B': // FALLTHROUGH
+            case '<': // FALLTHROUGH
+            case '>': // FALLTHROUGH
+            case '-': // FALLTHROUGH
+            case '+': // FALLTHROUGH
+            case '.': // FALLTHROUGH
+            case ',': // FALLTHROUGH
+            case '[': // FALLTHROUGH
             case ']':
-                valid_count++;
+                stream << c;
         }
-        source_i++;
     }
-
-    char *instructions = new char[valid_count+1](); //Create a char array to hold the instructions, plus a null terminator
-    char *instructions_i = instructions; //Iterator pointer for sanitized instructions
-    source_i = source; //Point the iterator back at the start
-
-    while(*source_i){
-        switch(*source_i){ //Add acceptable characters to the instruction string
-            case 'A':
-            case 'B':
-            case '<':
-            case '>':
-            case '-':
-            case '+':
-            case '.':
-            case ',':
-            case '[':
-            case ']':
-                *(instructions_i++) = *source_i;
-        }
-        source_i++;
-    }
-
-    *(instructions_i++) = '\0'; //Add a null terminator
-
-    return instructions;
+    return stream.str();
 }
 
 //Interpret and execute the MM code.
-void execute(char *instructions)
+void execute(const char *instructions)
 {
-    char *instruction_pointer;      //Keeps track of the interpreter's position in the program.
-    char *data_tape;                //Stores the data used by the program. Basically, it's RAM.
-    char *data_pointer_A;           //Used to modify/read cells on the data_tape. Controllable.
-    char *data_pointer_B;           //Used to modify/read cells on the data_tape. Controllable.
+    const char *instruction_pointer;         //Keeps track of the interpreter's position in the program.
+    std::unique_ptr<uint8_t> data_tape;                //Stores the data used by the program. Basically, it's RAM.
+    uint8_t *data_pointer_A;           //Used to modify/read cells on the data_tape. Controllable.
+    uint8_t *data_pointer_B;           //Used to modify/read cells on the data_tape. Controllable.
 
 
     instruction_pointer = instructions;
-    data_tape = new char[30000](); //BrainFuck interpreters conventionally have a 30000 byte memory block.
-    data_pointer_A = data_tape;
-    data_pointer_B = data_tape;
+    data_tape = std::unique_ptr<uint8_t>(new uint8_t[30000]()); //BrainFuck interpreters conventionally have a 30000 byte memory block.
+    memset(data_tape.get(), 0, 30000); // Clearing the entire tape, just in case
+    data_pointer_A = data_tape.get();
+    data_pointer_B = data_tape.get();
 
 
     while(*instruction_pointer) //Until the instruction pointer reaches the end of the instructions
     {
-        char **data_ptr; //Holds the address of the pointer specified by the command.
-        if(instruction_pointer[1]=='A'){
-            data_ptr = &data_pointer_A;
-        }
-        if(instruction_pointer[1]=='B'){
-            data_ptr = &data_pointer_B;
+        uint8_t **data_ptr; //Holds the address of the pointer specified by the command.
+        switch(*(instruction_pointer + 1))
+        {
+            case 'A':
+                data_ptr = &data_pointer_A;
+                break;
+            case 'B':
+                data_ptr = &data_pointer_B;
+                break;
+            default:
+                assert(false); // Should never happen
         }
 
         //Execute the appropriate instruction, using the appropriate data_pointer.
-        if(*instruction_pointer=='+'){
-            ++**data_ptr;               //Increment value at data_ptr
-        } else if(*instruction_pointer=='-'){
-            --**data_ptr;               //Decrement value at data_ptr
-        } else if(*instruction_pointer=='>'){
-            ++*data_ptr;                //Move data_ptr forward by 1
-        } else if(*instruction_pointer=='<'){
-            --*data_ptr;                //Move data_ptr back by 1
-        } else if(*instruction_pointer=='.'){
-            printf("%c",**data_ptr);    //Print data_ptr's value
-        } else if(*instruction_pointer==','){
-            **data_ptr=getch();         //Set value of data_ptr to character from console
-            printf("%c",**data_ptr);    //Display the char the user typed, as getch hides it.
-        } else if(*instruction_pointer=='['){
-            if(**data_ptr=='\0'){       //If the data_ptr is zero, skip to the matching close bracket
-                int level = 1;
-                while(level){
-                    instruction_pointer+=2;
-                    if (*instruction_pointer == '[') {
-                        level++;
-                    } else
-                    if (*instruction_pointer == ']') {
-                        level--;
+        switch(*instruction_pointer)
+        {
+            case '+':
+                (**data_ptr)++;
+                break;
+            case '-':
+                (**data_ptr)--;
+                break;
+            case '>':
+                (*data_ptr)++;
+                break;
+            case '<':
+                (*data_ptr)--;
+                break;
+            case '.':
+                std::cout << (char)+(**data_ptr);
+                break;
+            case ',':
+                **data_ptr = getch();
+                std::cout << (char)+(**data_ptr);
+                break;
+            case '[':
+                if(**data_ptr == 0){       //If the data_ptr is zero, skip to the matching close bracket
+                    int level = 1;
+                    while(level){
+                        instruction_pointer+=1;
+                        if (*instruction_pointer == '[') {
+                            level++;
+                        } else
+                        if (*instruction_pointer == ']') {
+                            level--;
+                        }
                     }
-                }
-            }                           //If the data_ptr isn't zero, let the interpreter enter the loop.
-        } else if(*instruction_pointer==']'){
-            if(**data_ptr!='\0'){       //If the data_ptr is not zero, jump back to the matching open bracket
-                int level = 1;
-                while(level){
+                }                           //If the data_ptr isn't zero, let the interpreter enter the loop.
+                break;
+            case ']':
+                if(**data_ptr != 0){       //If the data_ptr is not zero, jump back to the matching open bracket
+                    int level = 1;
+                    while(level){
+                        instruction_pointer-=1;
+                        if (*instruction_pointer == '[') {
+                            level--;
+                        } else
+                        if (*instruction_pointer == ']') {
+                            level++;
+                        }
+                    }
                     instruction_pointer-=2;
-                    if (*instruction_pointer == '[') {
-                        level--;
-                    } else
-                    if (*instruction_pointer == ']') {
-                        level++;
-                    }
-                }
-                instruction_pointer-=2;
-            }                           //If the data_ptr isn't zero, let the interpreter exit the loop.
-
+                }                           //If the data_ptr isn't zero, let the interpreter exit the loop.
+                break;
+            default:
+                assert(false); // Should never happen
         }
         instruction_pointer+=2;         //Move to the next instruction
 
-        long long int n = instruction_pointer-instructions;
-        n/=2;    //Debug.
+        uint64_t n = (instruction_pointer - instructions) / 2; // Debug
     }
 }
