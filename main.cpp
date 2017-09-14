@@ -100,20 +100,29 @@ std::string source_read(const std::string & filename)
 std::string source_sanitize(const std::string & source)
 {
     std::ostringstream stream;
+    bool lastWasAB = false;
     for(const char c : source)
     {
         switch(c){
-            case 'A': // FALLTHROUGH
+            case 'A':
             case 'B': // FALLTHROUGH
-            case '<': // FALLTHROUGH
+                if(lastWasAB)
+                    continue;
+                lastWasAB = true;
+                stream << c;
+                break;
+
+            case '<':
             case '>': // FALLTHROUGH
             case '-': // FALLTHROUGH
             case '+': // FALLTHROUGH
             case '.': // FALLTHROUGH
             case ',': // FALLTHROUGH
             case '[': // FALLTHROUGH
-            case ']':
+            case ']': // FALLTHROUGH
+                lastWasAB = false;
                 stream << c;
+                break;
         }
     }
     return stream.str();
