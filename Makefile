@@ -11,7 +11,7 @@ MindMeld: main.cpp
 release: CXXFLAGS+=-O2
 release: MindMeld
 
-debug: CXXFLAGS+=-g
+debug: CXXFLAGS+=-g -O0
 debug: MindMeld
 
 clean:

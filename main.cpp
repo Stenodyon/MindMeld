@@ -36,7 +36,10 @@
 #include <fstream>
 #include <iostream>
 #include <memory>
+#include <vector>
 #include <sstream>
+#include <stack>
+#include <utility>
 #ifdef _WIN32
 #include <conio.h>
 #endif
@@ -44,15 +47,41 @@
 #include "getch.hpp"
 #endif
 
+enum class InstrType // Represents a BrainF**k instruction
+{
+    PLUS,
+    MINUS,
+    LEFT,
+    RIGHT,
+    INPUT,
+    OUTPUT,
+    LOOP_OPEN,
+    LOOP_CLOSE
+};
+
+enum class Ptr { A, B }; // Designates which pointer to affect
+
+// Represents an (Instruction, Pointer) pair, with a special case for loops
+struct Instr
+{
+    InstrType type;
+    Ptr ptr;
+    uint64_t jump = 0;
+};
+
 //Pre-processing functions
 std::string source_read(const std::string & filename);
 std::string source_sanitize(const std::string & source);
 std::string switch_sanitize(const std::string & source);
 
+void tokenize(const std::string & source, std::vector<Instr> & out);
+
 //Execution function
 void execute(const char *instructions);
+void execute_tokens(const std::vector<Instr> & instructions);
 
 bool SWITCH = false;
+bool TOKENS = false;
 
 int main(int argc, char * argv[])
 {
@@ -61,6 +90,8 @@ int main(int argc, char * argv[])
     {
         if(std::string(argv[arg_pos]) == "--switch")
             SWITCH = true;
+        else if(std::string(argv[arg_pos]) == "--tokens")
+            TOKENS = true;
         else
             path = std::string(argv[arg_pos]);
     }
@@ -76,7 +107,16 @@ int main(int argc, char * argv[])
     else
         instructions = std::string(source_sanitize(raw_source));
     std::cout << instructions << std::endl;
-    execute(instructions.c_str());
+    if(TOKENS)
+    {
+        std::vector<Instr> tokens;
+        tokenize(instructions, tokens);
+        execute_tokens(tokens);
+    }
+    else
+    {
+        execute(instructions.c_str());
+    }
     std::cout << std::endl << "Press any key to continue..." << std::endl;
     getch();
     return 0;
@@ -165,6 +205,67 @@ std::string switch_sanitize(const std::string & source)
     return stream.str();
 }
 
+typedef std::stack<uint64_t> loop_stack;
+
+void tokenize(const std::string & source, std::vector<Instr> & out)
+{
+    loop_stack jump_stack;
+    assert(source.length() % 2 == 0); // source length MUST be even
+    for(uint64_t char_pos = 0; char_pos < source.length(); char_pos += 2)
+    {
+        Instr ins;
+        switch(source[char_pos])
+        {
+            case '<':
+                ins.type = InstrType::LEFT;
+                break;
+            case '>':
+                ins.type = InstrType::RIGHT;
+                break;
+            case '-':
+                ins.type = InstrType::MINUS;
+                break;
+            case '+':
+                ins.type = InstrType::PLUS;
+                break;
+            case '.':
+                ins.type = InstrType::OUTPUT;
+                break;
+            case ',':
+                ins.type = InstrType::INPUT;
+                break;
+            case '[':
+                ins.type = InstrType::LOOP_OPEN;
+                break;
+            case ']':
+                ins.type = InstrType::LOOP_CLOSE;
+                break;
+        }
+        switch(source[char_pos + 1])
+        {
+            case 'A':
+                ins.ptr = Ptr::A;
+                break;
+            case 'B':
+                ins.ptr = Ptr::B;
+                break;
+        }
+        out.push_back(ins);
+        if(ins.type == InstrType::LOOP_OPEN)
+        {
+            jump_stack.push(char_pos / 2);
+        }
+        if(ins.type == InstrType::LOOP_CLOSE)
+        {
+            uint64_t pos = jump_stack.top();
+            jump_stack.pop();
+            uint64_t jump_distance = char_pos / 2 - pos;
+            out.back().jump = jump_distance;
+            out.at(pos).jump = jump_distance;
+        }
+    }
+}
+
 //Interpret and execute the MM code.
 void execute(const char *instructions)
 {
@@ -251,6 +352,80 @@ void execute(const char *instructions)
                 assert(false); // Should never happen
         }
         instruction_pointer+=2;         //Move to the next instruction
+    }
+}
+
+//Interpret and execute the MM code.
+void execute_tokens(const std::vector<Instr> & instructions)
+{
+    std::unique_ptr<uint8_t> data_tape;                //Stores the data used by the program. Basically, it's RAM.
+    uint8_t *data_pointer_A;           //Used to modify/read cells on the data_tape. Controllable.
+    uint8_t *data_pointer_B;           //Used to modify/read cells on the data_tape. Controllable.
+
+
+    data_tape = std::unique_ptr<uint8_t>(new uint8_t[30000]()); //BrainFuck interpreters conventionally have a 30000 byte memory block.
+    memset(data_tape.get(), 0, 30000); // Clearing the entire tape, just in case
+    data_pointer_A = data_tape.get();
+    data_pointer_B = data_tape.get();
+
+
+    for(auto instruction_pointer = instructions.begin();
+            instruction_pointer != instructions.end();
+            instruction_pointer++)
+    {
+        const Instr * instr_ptr = instructions.data(); // debug
+        uint8_t **data_ptr; //Holds the address of the pointer specified by the command.
+        switch(instruction_pointer->ptr)
+        {
+            case Ptr::A:
+                data_ptr = &data_pointer_A;
+                break;
+            case Ptr::B:
+                data_ptr = &data_pointer_B;
+                break;
+            default:
+                assert(false); // Should never happen
+        }
+
+        //Execute the appropriate instruction, using the appropriate data_pointer.
+        switch(instruction_pointer->type)
+        {
+            case InstrType::PLUS:
+                (**data_ptr)++;
+                break;
+            case InstrType::MINUS:
+                (**data_ptr)--;
+                break;
+            case InstrType::RIGHT:
+                (*data_ptr)++;
+                break;
+            case InstrType::LEFT:
+                (*data_ptr)--;
+                break;
+            case InstrType::OUTPUT:
+                std::cout << (char)+(**data_ptr);
+                break;
+            case InstrType::INPUT:
+                **data_ptr = getch();
+                std::cout << (char)+(**data_ptr);
+                break;
+            case InstrType::LOOP_OPEN:
+                if(**data_ptr == 0)       //If the data_ptr is zero, skip to the matching close bracket
+                {
+                    assert(instruction_pointer->jump != 0);
+                    instruction_pointer = std::next(instruction_pointer, instruction_pointer->jump);
+                }
+                break;
+            case InstrType::LOOP_CLOSE:
+                if(**data_ptr != 0)       //If the data_ptr is not zero, jump back to the matching open bracket
+                {
+                    assert(instruction_pointer->jump != 0);
+                    instruction_pointer = std::prev(instruction_pointer, instruction_pointer->jump);
+                }
+                break;
+            default:
+                assert(false); // Should never happen
+        }
     }
 }
 
